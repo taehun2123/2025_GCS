@@ -7,36 +7,38 @@ import { CMD } from "constants/commands";
 import { useTelemetry } from "hooks/useTelemetry";
 import { useTimeControl } from "hooks/useTimeControl";
 import { useSimulation } from "hooks/useSimulation";
-import { useMechanical } from "hooks/useMechanical";
 import { useSerialContext } from "context/SerialContext";
 import { MissionTime } from "./MissionTime";
 import { electronService } from "services/electronService";
+import { useAppState } from "context/AppStateContext";
+import FileInputDialog from "./FileInputDialog";
+import { useFileInput } from "hooks/useFileInput";
 
 const Main: React.FC = () => {
   // 중앙 서비스
   const { isConnected, setIsConnected } = useSerialContext();
   const ipcRenderer = electronService.ipcRenderer;
 
-  // ===== UI 상태 =====
-  // 현재 탭
-  const [activeTab, setActiveTab] = useState<"telemetry" | "cmdecho">(
-    "telemetry"
-  );
-  // 데이터 표시 방식
-  const [viewMode, setViewMode] = useState<"charts" | "table">("charts");
-
   // Custom Hooks
   const serialHk = useSerial();
   const useTel = useTelemetry();
   const useTime = useTimeControl();
   const useSim = useSimulation();
-  const useMec = useMechanical();
+  const useFile = useFileInput();
+
+  const {
+    isMec,
+    setIsMec,
+    isTelemetry,
+    setIsTelemetry,
+    activeTab,
+    setActiveTab,
+    viewMode,
+    setViewMode,
+  } = useAppState();
 
   // constants 변수
   const cmd = CMD;
-
-  // MEC ON 버튼 상태를 관리하기 위함
-  const [isMec, setIsMec] = useState(false);
 
   const handleToggleMEC = async () => {
     if (isConnected) {
@@ -52,6 +54,24 @@ const Main: React.FC = () => {
       } catch (error) {
         console.error("Failed to toggle MEC:", error);
         alert(`MEC 상태 변경 실패\n\nFailed to toggle MEC state`);
+      }
+    }
+  };
+
+  const handleToggleTelemetry = async () => {
+    if (isConnected) {
+      console.log(`telemetry status: ${isTelemetry}`);
+      try {
+        if (!isTelemetry) {
+          useTel.handleStartTelemetry();
+          setIsTelemetry(true);
+        } else {
+          useTel.handleStopTelemetry();
+          setIsTelemetry(false);
+        }
+      } catch (error) {
+        console.error("Failed to toggle TELEMETRY:", error);
+        alert(`TELEMETRY 상태 변경 실패\n\nFailed to toggle TELEMETRY state`);
       }
     }
   };
@@ -203,7 +223,7 @@ const Main: React.FC = () => {
       <div className="flex justify-between items-center px-8 py-2 bg-gray-100 border-b border-gray-300 h-[50px]">
         <div className="flex flex-row justify-center items-center gap-4">
           <span>MISSION TIME</span>
-          <MissionTime UTCTime={useTime.UTCTime} />
+          <MissionTime setTime={useTime.setTime} />
         </div>
 
         <div className="flex gap-4">
@@ -216,21 +236,35 @@ const Main: React.FC = () => {
               SET TIME
             </button>
           )}
-
+          {/* SET TIME 활성화 시 View */}
           {useTime.isToggleTime && (
             <div className="flex items-center gap-2">
-              <form onSubmit={useTime.handleSetUTCTime} className="flex-1">
+              <button
+                onClick={() => useTime.setIsToggleTime(false)}
+                className="px-3 py-2 text-white bg-gray-400 hover:bg-red-500 active:bg-red-600 transition-colors duration-200 font-bold rounded"
+              >
+                ✖
+              </button>
+              {/* 시간 입력 form */}
+              <form onSubmit={(e) => e.preventDefault()} className="flex-1">
                 <input
                   type="text"
                   onChange={useTime.handleTimeInputChange}
-                  value={useTime.UTCTime}
-                  placeholder="Enter UTC Time (hh:mm:ss)"
+                  value={useTime.inputedTime}
+                  placeholder="hh:mm:ss"
                   maxLength={8}
                   className="w-full px-3 py-2 rounded border border-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent placeholder-gray-400 font-mono"
                 />
               </form>
               <button
-                className="px-4 py-2 rounded bg-blue-900 text-white font-bold hover:bg-blue-800 whitespace-nowrap transition-colors duration-200"
+                className="px-4 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all duration-200 shadow-md"
+                disabled={!isConnected}
+                onClick={useTime.handleSetUTCTime}
+              >
+                SET UTC TIME
+              </button>
+              <button
+                className="px-4 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500 transition-all duration-200 shadow-md"
                 disabled={!isConnected}
                 onClick={useTime.handleSetGPSTime}
               >
@@ -255,18 +289,13 @@ const Main: React.FC = () => {
             {isMec ? "MEC OFF" : "MEC ON"}
           </button>
           <button
-            className="px-4 py-2 rounded bg-blue-900 text-white font-bold hover:bg-blue-800"
-            onClick={useTel.handleStartTelemetry}
+            className={`px-4 py-1 rounded text-white font-bold hover:bg-blue-800 ${
+              isTelemetry ? "bg-red-600 hover:bg-red-700" : "bg-blue-900"
+            }`}
             disabled={!isConnected}
+            onClick={handleToggleTelemetry}
           >
-            START TELEMETRY
-          </button>
-          <button
-            className="px-4 py-2 rounded bg-blue-900 text-white font-bold hover:bg-blue-800"
-            onClick={useTel.handleStopTelemetry}
-            disabled={!isConnected}
-          >
-            STOP TELEMETRY
+            {isTelemetry ? "STOP TELEMETRY" : "START TELEMETRY"}
           </button>
         </div>
 
@@ -331,12 +360,11 @@ const Main: React.FC = () => {
                 <p className="m-0">SIMULATION MODE</p>
                 <p className="font-bold m-0">{useSim.simStatus}</p>
                 <div className="flex gap-1">
-                  <input
-                    type="file"
-                    ref={useSim.fileInputRef}
-                    onChange={useSim.handleFileUpload}
-                    className="hidden"
-                    accept=".txt"
+                  {/* 파일 다이얼로그 컴포넌트 */}
+                  <FileInputDialog
+                    isVisible={useSim.showFileDialog}
+                    onFileSelect={useFile.handleFileSelect} // 함수 참조를 전달 (함수 호출이 아님)
+                    onDialogClose={() => useSim.setShowFileDialog(false)}
                   />
                   <button
                     className={`flex-1 p-2 rounded cursor-pointer text-sm ${
@@ -344,21 +372,7 @@ const Main: React.FC = () => {
                         ? "bg-blue-900 text-white"
                         : "bg-gray-100"
                     }`}
-                    onClick={() => {
-                      useSim.handleSimEnable(); // ENABLE 동작 호출
-                      setActiveTab("cmdecho"); // CMD ECHO 탭으로 변경
-                      useSim.fileInputRef.current?.addEventListener(
-                        "change",
-                        () => {
-                          if (useSim.hasValidSimFile) {
-                            //
-                            alert(
-                              "Simulation data is ready to be transmitted.\n시뮬레이션 데이터 전송 준비가 완료되었습니다."
-                            );
-                          }
-                        }
-                      );
-                    }}
+                    onClick={useSim.handleSimEnable}
                     disabled={!isConnected}
                   >
                     ENABLE
@@ -369,12 +383,7 @@ const Main: React.FC = () => {
                         ? "bg-blue-900 text-white"
                         : "bg-gray-100"
                     }`}
-                    onClick={() => {
-                      useSim.handleSimActivate();
-                      alert(
-                        "Simulation data transmission has started.\n시뮬레이션 데이터 전송이 시작되었습니다."
-                      );
-                    }}
+                    onClick={useSim.handleSimActivate}
                     disabled={
                       !isConnected ||
                       !useSim.hasValidSimFile ||
@@ -389,12 +398,7 @@ const Main: React.FC = () => {
                         ? "bg-blue-900 text-white"
                         : "bg-gray-100"
                     }`}
-                    onClick={() => {
-                      useSim.handleSimDisable();
-                      alert(
-                        "Simulation mode is ending.\n시뮬레이션 모드가 종료됩니다."
-                      );
-                    }}
+                    onClick={useSim.handleSimDisable}
                     disabled={!isConnected}
                   >
                     DISABLE

@@ -1,10 +1,8 @@
 import { createContext, useContext, useState } from "react";
-import { electronService } from "services/electronService";
 
 interface SerialContextType {
   isConnected: boolean;
   setIsConnected: (value: boolean) => void;
-  ipcRenderer: typeof electronService.ipcRenderer;
   serialPorts: Array<{ path: string }>;
   setSerialPorts: (ports: Array<{ path: string }>) => void;
   selectedPort: string;
@@ -23,7 +21,6 @@ export const SerialProvider: React.FC<{ children: React.ReactNode }> = ({
   const value = {
     isConnected,
     setIsConnected,
-    ipcRenderer: electronService.ipcRenderer,
     serialPorts,
     setSerialPorts,
     selectedPort,

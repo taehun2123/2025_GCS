@@ -33,9 +33,25 @@ function createWindow() {
   }
 }
 
+const { dialog } = require('electron');
+
 // 텔레메트리 데이터 저장 핸들러
 ipcMain.handle('save-telemetry', async (event, data) => {
   try {
+    // 파일 저장 위치 묻기
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: path.join(app.getPath('downloads'), 'Flight_3167.csv'),
+      filters: [
+        { name: 'CSV Files', extensions: ['csv'] }
+      ]
+    });
+
+    // 사용자에게 경로를 물어보고, 경로가 선택되지 않은 경우 종료
+    if (result.canceled || !result.filePath) {
+      console.log('File save canceled');
+      return { success: false, message: 'File save canceled' };
+    }
+
     // CSV 헤더 정의
     const headers = [
       'TEAM_ID', 'MISSION_TIME', 'PACKET_COUNT', 'MODE', 'STATE',
@@ -62,16 +78,12 @@ ipcMain.handle('save-telemetry', async (event, data) => {
       ].join(',');
     });
 
-    // 파일명 생성 (타임스탬프 포함)
-    const fileName = `Flight_3167.csv`;
-    const filePath = path.join(app.getPath('downloads'), fileName);
-
     // CSV 파일 작성
     const csvContent = [headers, ...rows].join('\n');
-    await fs.promises.writeFile(filePath, csvContent);
+    await fs.promises.writeFile(result.filePath, csvContent);
 
-    console.log(`Telemetry data saved successfully to: ${filePath}`);
-    return { success: true, filePath };
+    console.log(`Telemetry data saved successfully to: ${result.filePath}`);
+    return { success: true, filePath: result.filePath };
   } catch (error) {
     console.error('Error saving telemetry data:', error);
     return { success: false, error: error.message };
@@ -167,12 +179,39 @@ ipcMain.handle('send-data', async (event, data) => {
     console.error('Cannot send data: Port not connected');
     return { success: false, error: 'Port not connected' };
   }
-  
   try {
     port.write(`${data}\r\n`);
     console.log('Data sent:', data);
     mainWindow.webContents.send('serial-sent', data);
-    return { success: true };
+    // ts 파일 import가 불가능하여 직접 대조
+    if (data === "CMD,3167,ST,GPS") {
+      // GPS 응답을 받을 때까지 기다림
+      return new Promise((resolve, reject) => {
+        port.once('data', (response) => {
+          try {
+            const gpsTime = response.toString().trim(); // 응답을 문자열로 변환
+            console.log("Response GPS Time: ", gpsTime);
+            // 시간 포맷을 체크하거나 응답 형식에 맞게 처리
+            if (/^\d{2}:\d{2}:\d{2}$/.test(gpsTime)) {
+              console.log('Received GPS time:', gpsTime);
+              resolve({ success: true, gpsTime: gpsTime }); // GPS 시간 반환
+            } else {
+              reject(new Error('Invalid GPS time format'));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+
+        // 일정 시간 내에 응답이 오지 않으면 에러 처리 (타임아웃)
+        setTimeout(() => {
+          reject(new Error('GPS time response timeout'));
+        }, 5000); // 5초 동안 응답이 없으면 타임아웃
+      });
+    } else {
+      // 일반 명령은 success만 반환
+      return { success: true };
+    }
   } catch (error) {
     console.error('Error sending data:', error);
     return { success: false, error: error.message };
